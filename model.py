@@ -3,7 +3,7 @@ import numpy as np
 
 BIDIR = True
 LAYERS = 2
-HIDDEN = 256
+HIDDEN = 512
 LR = 1e-3
 class Graph():
     def last_relevant(self, output, length):
@@ -25,6 +25,8 @@ class Graph():
         with self.graph.as_default():
             self.inputs = tf.placeholder(
                     tf.float32, (None, max_len, 768), 'inputs')
+            self.inputs_utt = tf.placeholder(
+                    tf.float32, (None,), 'inputs_utt')
             self.outputs = tf.placeholder( tf.float32, (None, ), 'outputs')
             self.inputs_len = self.length(self.inputs)
                     
@@ -52,8 +54,10 @@ class Graph():
                                         sequence_length = self.inputs_len,
                                         dtype = tf.float32)
                     rnn_outputs = tf.concat(rnn_outputs, 2)
+
             with tf.name_scope('project'):
                 last = self.last_relevant(rnn_outputs, self.inputs_len)
+                last = tf.concat([last, self.inputs_utt[:,None]],1)
                 logits = tf.layers.dense(last, 256, tf.nn.relu)
                 logits = tf.layers.dropout(logits, 0.5, training=is_train)
                 logits = tf.layers.dense(last, 256, tf.nn.relu)

@@ -11,9 +11,12 @@ def load_file(path):
         for line in f:
             element = line.strip().split('\t')
             pph = element[0]
-            isr = element[1]
-            s_fname = element[2]
-            s_id = int(element[3])
+            isr = float(element[1].split(':')[-1])
+            isr_utt = float(element[2].split(':')[-1])
+            isr_raw = float(element[3].split(':')[-1])
+            s_fname = element[4]
+            s_id = int(element[5])
+
             pph_data = {
                 'pph': pph,
                 'isr': isr,
@@ -25,7 +28,9 @@ def load_file(path):
                     'sentence': '',
                     'pph_data': [],
                     's_id': s_id,
-                    's_fname': s_fname
+                    's_fname': s_fname,
+                    'isr_utt': isr_utt,
+                    'isr_raw': isr_raw
                 }
                 idx = s_id
             sentence_data['sentence'] += pph
@@ -35,9 +40,9 @@ def load_file(path):
             
 
 def load_data():
-    trn_path = './data/training_pph_bert.txt'
-    test_path = './data/valid_pph_bert.txt'
-    valid_path = './data/test_pph_bert.txt'
+    trn_path = './data/with_utt/training_pph_bert.txt'
+    test_path = './data/with_utt/test_pph_bert.txt'
+    valid_path = './data/with_utt/valid_pph_bert.txt'
     data = {}
     data['trn'] = load_file(trn_path)
     load_vec(data['trn'])
@@ -73,21 +78,32 @@ def prepare_data(data):
         for i in data:
             for j in i['pph_data']:
                 cnt += 1
+        # pph character vector
         feature = np.zeros((cnt, length, dim))
-
         cnt = 0
         for i in data:
             for j in i['pph_data']:
                 l = j['pph_vec'].shape[0]
                 feature[cnt][:l] = j['pph_vec']
                 cnt += 1
+        
+        # utt isr
+        feature_utt = np.zeros(cnt)
+        cnt = 0
+        for i in data:
+            for j in i['pph_data']:
+                feature_utt[cnt] = i['isr_utt']
+                cnt +=1
+
+        
+        # pph local isr
         label = np.zeros(cnt)
         cnt = 0 
         for i in data:
             for j in i['pph_data']:
                 label[cnt] = j['isr']
                 cnt += 1 
-        return {'feature':feature, 'label':label}
+        return {'feature':feature, 'feature_utt': feature_utt, 'label':label}
     def get_seq_shape(data):
         cnt = 0
         length, dim = data[1]['pph_data'][0]['pph_vec'].shape
@@ -115,22 +131,78 @@ def next_batch(dataset, batch):
     shuffle = np.random.permutation(dataset['feature'].shape[0])
     start = 0
     x = dataset['feature'][shuffle]
+    x1 = dataset['feature_utt'][shuffle]
     y = dataset['label'][shuffle]
     while(start+batch <= cnt):
         yield (
             x[start:start+batch],
+            x1[start:start+batch],
             y[start:start+batch]
         )
         start += batch
-def gen_fd(x,y, g):
+    yield( x[start:], x1[start:], y[start:])
+
+def next_batch_nos(dataset, batch):
+    cnt = dataset['feature'].shape[0]
+    start = 0
+    x = dataset['feature']
+    x1 = dataset['feature_utt']
+    y = dataset['label']
+    while(start+batch <= cnt):
+        yield (
+            x[start:start+batch],
+            x1[start:start+batch],
+            y[start:start+batch]
+        )
+        start += batch
+    yield( x[start:], x1[start:], y[start:])
+
+def gen_fd(x, x1, y, g):
     fd = {}
-    fd[g.inputs]=x
-    fd[g.outputs]=y
+    fd[g.inputs] = x
+    fd[g.inputs_utt] = x1
+    fd[g.outputs] = y
     return fd
+
+def calc_tre(data, preds, ans):
+    idx = 0
+    tre = np.zeros(len(data))
+    for cnt_s, i in enumerate(data):
+        preds_err_var = np.zeros(len(data))
+        preds_var = np.zeros(len(data))
+        for cnt, j in enumerate(i['pph_data']):
+            preds_err_var[cnt] = preds[idx]-ans[idx]
+            preds_var[cnt] = ans[idx]
+            idx += 1
+        err_var = np.var(preds_err_var)
+        var = np.var(preds_var)
+        tre[cnt_s] = err_var/var
+    tre_total = np.mean(tre)
+    return tre_total
+def run_tre(sess, g, data, dataset):
+    batch = 200
+    preds = None
+    for x,x1,y in next_batch_nos(dataset, batch):
+        fd = gen_fd(x,x1,y,g)
+        _, test_loss, test_preds = sess.run(
+                            [g.train_op, 
+                             g.loss, 
+                             g.preds],
+                            feed_dict = fd
+            )
+        test_preds = np.reshape(test_preds, (test_preds.shape[0]))
+        if preds is None:
+            preds = test_preds
+        else:
+            preds = np.concatenate((preds, test_preds))
+  
+    tre = calc_tre(data, preds, dataset['label'])
+    return tre
+
 
 def main():
     # Load Data from raw or pkl
-    data_pre_path = './data/data.pkl'
+    data_pre_path = './data/with_utt/data_utt.pkl'
     if os.path.exists(data_pre_path):
         with open(data_pre_path, 'rb') as f:
             data = pickle.load(f)
@@ -175,19 +247,20 @@ def main():
     batch = 200
     sess_trn.run(init_trn)
     for i in range(epochs):
-        for x,y in next_batch(dataset['trn'], batch):
-            fd = gen_fd(x,y,g_trn)
+        for x, x1, y in next_batch(dataset['trn'], batch):
+            fd = gen_fd(x, x1, y,g_trn)
             _, trn_loss, summary_trn = sess_trn.run(
-                                [g_trn.train_op, g_trn.loss, g_trn.summary_op],
+                                [g_trn.train_op, g_trn.loss, 
+                                 g_trn.summary_op],
                                 feed_dict = fd
                 )
         ckpt = './log/model_epoch_{:02d}.ckpt'.format(i)
         save_trn.save(sess_trn, ckpt)
-
+        
         sess_valid.run(init_valid)
         save_valid.restore(sess_valid, ckpt)
-        for x,y in next_batch(dataset['valid'], batch):
-            fd = gen_fd(x,y,g_valid)
+        for x,x1,y in next_batch(dataset['valid'], batch):
+            fd = gen_fd(x,x1,y,g_valid)
             _, valid_loss, summary_valid = sess_valid.run(
                                 [g_valid.train_op, 
                                  g_valid.loss, 
@@ -197,8 +270,8 @@ def main():
     
         sess_test.run(init_test)
         save_test.restore(sess_test, ckpt)
-        for x,y in next_batch(dataset['test'], batch):
-            fd = gen_fd(x,y,g_test)
+        for x,x1,y in next_batch(dataset['test'], batch):
+            fd = gen_fd(x,x1,y,g_test)
             _, test_loss, summary_test = sess_test.run(
                                 [g_test.train_op, 
                                  g_test.loss, 
@@ -207,12 +280,23 @@ def main():
                 )
 
         print('Epoch {:3}'.format(i),
-                'Train loss: {:>6.5f}'.format(trn_loss),
-                'Valid loss: {:>6.5f}'.format(valid_loss),
-                'Test loss: {:>6.5f}'.format(test_loss))
+              '\tTrain loss: {:>6.5f}'.format(trn_loss),
+              '\tValid loss: {:>6.5f}'.format(valid_loss),
+              '\tTest loss: {:>6.5f}'.format(test_loss))
         writer_trn.add_summary(summary_trn,i)
         writer_valid.add_summary(summary_valid,i)
         writer_test.add_summary(summary_test,i)
+
+        # run tre
+        sess_valid.run(init_valid)
+        save_valid.restore(sess_valid, ckpt)
+        tre_valid = run_tre(sess_valid, g_valid, data['valid'], dataset['valid'])
+        sess_test.run(init_test)
+        save_test.restore(sess_test, ckpt)
+        tre_test = run_tre(sess_test, g_test, data['test'], dataset['test'])
+        print('\tValid TRE: {:>6.5f}'.format(tre_valid), 
+              '\tTest TRE: {:>6.5f}'.format(tre_test))
+
     sess_trn.close()
     sess_valid.close()
     sess_test.close()
