@@ -35,9 +35,9 @@ def load_file(path):
             
 
 def load_data():
-    trn_path = './data/training_pph_bert.txt'
-    test_path = './data/valid_pph_bert.txt'
-    valid_path = './data/test_pph_bert.txt'
+    trn_path = './data/without_utt/training_pph_bert.txt'
+    test_path = './data/without_utt/valid_pph_bert.txt'
+    valid_path = './data/without_utt/test_pph_bert.txt'
     data = {}
     data['trn'] = load_file(trn_path)
     load_vec(data['trn'])
@@ -122,15 +122,67 @@ def next_batch(dataset, batch):
             y[start:start+batch]
         )
         start += batch
+    yield( x[start:], y[start:])
+
+def next_batch_nos(dataset, batch):
+    cnt = dataset['feature'].shape[0]
+    start = 0
+    x = dataset['feature']
+    y = dataset['label']
+    while(start+batch <= cnt):
+        yield (
+            x[start:start+batch],
+            y[start:start+batch]
+        )
+        start += batch
+    yield( x[start:], y[start:])
+
 def gen_fd(x,y, g):
     fd = {}
     fd[g.inputs]=x
     fd[g.outputs]=y
     return fd
 
+def calc_tre(data, preds, ans):
+    idx = 0
+    tre = np.zeros(len(data))
+    for cnt_s, i in enumerate(data):
+        preds_err_var = np.zeros(len(data))
+        preds_var = np.zeros(len(data))
+        for cnt, j in enumerate(i['pph_data']):
+            preds_err_var[cnt] = preds[idx]-ans[idx]
+            preds_var[cnt] = ans[idx]
+            idx += 1
+        err_var = np.var(preds_err_var)
+        var = np.var(preds_var)
+        tre[cnt_s] = err_var/var
+    tre_total = np.mean(tre)
+    return tre_total
+
+def run_tre(sess, g, data, dataset):
+    batch = 200
+    preds = None
+    for x,y in next_batch_nos(dataset, batch):
+        fd = gen_fd(x,y,g)
+        _, test_loss, test_preds = sess.run(
+                            [g.train_op,
+                             g.loss,
+                             g.preds],
+                            feed_dict = fd
+            )
+        test_preds = np.reshape(test_preds, (test_preds.shape[0]))
+        if preds is None:
+            preds = test_preds
+        else:
+            preds = np.concatenate((preds, test_preds))
+
+    tre = calc_tre(data, preds, dataset['label'])
+    return tre
+
+
 def main():
     # Load Data from raw or pkl
-    data_pre_path = './data/data.pkl'
+    data_pre_path = './data/without_utt/data.pkl'
     if os.path.exists(data_pre_path):
         with open(data_pre_path, 'rb') as f:
             data = pickle.load(f)
@@ -207,12 +259,23 @@ def main():
                 )
 
         print('Epoch {:3}'.format(i),
-                'Train loss: {:>6.5f}'.format(trn_loss),
-                'Valid loss: {:>6.5f}'.format(valid_loss),
-                'Test loss: {:>6.5f}'.format(test_loss))
+                '\tTrain loss: {:>6.5f}'.format(trn_loss),
+                '\tValid loss: {:>6.5f}'.format(valid_loss),
+                '\tTest loss: {:>6.5f}'.format(test_loss))
         writer_trn.add_summary(summary_trn,i)
         writer_valid.add_summary(summary_valid,i)
         writer_test.add_summary(summary_test,i)
+        
+        # Run TRE
+        sess_valid.run(init_valid)
+        save_valid.restore(sess_valid, ckpt)
+        tre_valid = run_tre(sess_valid, g_valid, data['valid'], dataset['valid'])
+        sess_test.run(init_test)
+        save_test.restore(sess_test, ckpt)
+        tre_test = run_tre(sess_test, g_test, data['test'], dataset['test'])
+        print('\t\tValid TRE: {:>6.5f}'.format(tre_valid),
+              '\tTest TRE: {:>6.5f}'.format(tre_test))
+
     sess_trn.close()
     sess_valid.close()
     sess_test.close()
