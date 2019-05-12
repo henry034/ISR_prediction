@@ -294,8 +294,8 @@ def main():
         sess_test.run(init_test)
         save_test.restore(sess_test, ckpt)
         tre_test = run_tre(sess_test, g_test, data['test'], dataset['test'])
-        print('\tValid TRE: {:>6.5f}'.format(tre_valid), 
-              '\tTest TRE: {:>6.5f}'.format(tre_test))
+        print('\t\tValid TRE: {:>6.5f}'.format(tre_valid), 
+              '\t\tTest TRE: {:>6.5f}'.format(tre_test))
 
     sess_trn.close()
     sess_valid.close()
