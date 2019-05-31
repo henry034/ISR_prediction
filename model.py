@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
+MODEL = 0 # 0:LSTM+NN, 1:mean+NN
 BIDIR = True
 LAYERS = 2
 HIDDEN = 256
@@ -27,33 +28,36 @@ class Graph():
                     tf.float32, (None, max_len, 768), 'inputs')
             self.outputs = tf.placeholder( tf.float32, (None, ), 'outputs')
             self.inputs_len = self.length(self.inputs)
-                    
-            with tf.name_scope('rnn'):
-                cell = tf.nn.rnn_cell.BasicLSTMCell
-                if BIDIR:
-                    cells_fw = []
-                    cells_bw = []
-                    for _ in range(LAYERS):
-                        cell_fw = cell(HIDDEN)
-                        cell_bw = cell(HIDDEN)
-                        if is_train:
-                            cell_fw =tf.nn.rnn_cell.DropoutWrapper(cell_fw,
-                                    0.5,0.5,True)
-                            cell_bw =tf.nn.rnn_cell.DropoutWrapper(cell_bw,
-                                    0.5,0.5,True)
-                        cells_fw.append(cell_fw)
-                        cells_bw.append(cell_bw)
-                    cells_fw = tf.nn.rnn_cell.MultiRNNCell(cells_fw)
-                    cells_bw = tf.nn.rnn_cell.MultiRNNCell(cells_bw)
-                    rnn_outputs, _ = tf.nn.bidirectional_dynamic_rnn(
-                                        cells_fw,
-                                        cells_bw,
-                                        inputs = self.inputs,
-                                        sequence_length = self.inputs_len,
-                                        dtype = tf.float32)
-                    rnn_outputs = tf.concat(rnn_outputs, 2)
+            
+            if MODEL == 0:
+                with tf.name_scope('rnn'):
+                    cell = tf.nn.rnn_cell.BasicLSTMCell
+                    if BIDIR:
+                        cells_fw = []
+                        cells_bw = []
+                        for _ in range(LAYERS):
+                            cell_fw = cell(HIDDEN)
+                            cell_bw = cell(HIDDEN)
+                            if is_train:
+                                cell_fw =tf.nn.rnn_cell.DropoutWrapper(cell_fw,
+                                        0.5,0.5,True)
+                                cell_bw =tf.nn.rnn_cell.DropoutWrapper(cell_bw,
+                                        0.5,0.5,True)
+                            cells_fw.append(cell_fw)
+                            cells_bw.append(cell_bw)
+                        cells_fw = tf.nn.rnn_cell.MultiRNNCell(cells_fw)
+                        cells_bw = tf.nn.rnn_cell.MultiRNNCell(cells_bw)
+                        rnn_outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+                                            cells_fw,
+                                            cells_bw,
+                                            inputs = self.inputs,
+                                            sequence_length = self.inputs_len,
+                                            dtype = tf.float32)
+                        rnn_outputs = tf.concat(rnn_outputs, 2)
+                        last = self.last_relevant(rnn_outputs, self.inputs_len)
+            elif MODEL ==1:
+                last = tf.reduce_mean(self.inputs, 1)
             with tf.name_scope('project'):
-                last = self.last_relevant(rnn_outputs, self.inputs_len)
                 logits = tf.layers.dense(last, 256, tf.nn.relu)
                 logits = tf.layers.dropout(logits, 0.5, training=is_train)
                 logits = tf.layers.dense(last, 256, tf.nn.relu)
