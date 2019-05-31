@@ -225,21 +225,22 @@ def main():
     # Start 
     epochs = 20
     batch = 200
+    batch_trn = dataset['trn']['feature'].shape[0]/batch
+    batch_valid = dataset['valid']['feature'].shape[0]/batch
+    batch_test = dataset['test']['feature'].shape[0]/batch
     sess_trn.run(init_trn)
     for i in range(epochs):
         trn_loss = 0
         test_loss = 0
         valid_loss = 0
-        batch_cnt = 0
         for x,y in next_batch(dataset['trn'], batch):
             fd = gen_fd(x,y,g_trn)
             _, tmp_loss, summary_trn = sess_trn.run(
                                 [g_trn.train_op, g_trn.loss, g_trn.summary_op],
                                 feed_dict = fd
                 )
-            batch_cnt += 1
             trn_loss += tmp_loss
-        trn_loss /= batch_cnt
+        trn_loss /= batch_trn
         ckpt = './log/model_epoch_{:02d}.ckpt'.format(i)
         save_trn.save(sess_trn, ckpt)
 
@@ -254,7 +255,7 @@ def main():
                                  feed_dict = fd
                 )
             valid_loss += tmp_loss
-        valid_loss /= batch_cnt
+        valid_loss /= batch_valid
 
         sess_test.run(init_test)
         save_test.restore(sess_test, ckpt)
@@ -267,7 +268,7 @@ def main():
                                  feed_dict = fd
                 )
             test_loss += tmp_loss
-        test_loss /= batch_cnt
+        test_loss /= batch_test
 
         print('Epoch {:3}'.format(i),
                 '\tTrain loss: {:>6.5f}'.format(trn_loss),
