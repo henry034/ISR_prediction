@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-MODEL = 0 # 0:LSTM+NN, 1:mean+NN
+MODEL = 1 # 0:LSTM+NN, 1:mean+NN
 BIDIR = True
 LAYERS = 2
 HIDDEN = 256
