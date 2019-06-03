@@ -165,6 +165,11 @@ def gen_fd(x, x1, y, g):
     return fd
 
 def calc_tre(data, preds, ans):
+    # output
+    model_name = ['lstm','mean']
+    file_output = './utt_preds_{}.log'.format(model_name[MODEL])
+    fp = open(file_output, 'w')
+    
     idx = 0
     tre = np.zeros(len(data))
     for cnt_s, i in enumerate(data):
@@ -173,11 +178,13 @@ def calc_tre(data, preds, ans):
         for cnt, j in enumerate(i['pph_data']):
             preds_err_var[cnt] = preds[idx]-ans[idx]
             preds_var[cnt] = ans[idx]
+            fp.write('{}\n'.format(preds[idx])) #output
             idx += 1
         err_var = np.var(preds_err_var)
         var = np.var(preds_var)
         tre[cnt_s] = err_var/var
     tre_total = np.mean(tre)
+    fp.close()
     return tre_total
 def run_tre(sess, g, data, dataset):
     batch = 200
@@ -243,7 +250,7 @@ def main():
         save_test = tf.train.Saver()
 
     # Start 
-    epochs = 20
+    epochs = 7
     batch = 200
     batch_trn = dataset['trn']['feature'].shape[0]/batch
     batch_valid = dataset['valid']['feature'].shape[0]/batch
